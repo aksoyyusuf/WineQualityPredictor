@@ -1,0 +1,704 @@
+---
+title: "Wine Quality Predictor"
+output: html_notebook
+---
+
+# Dependencies
+
+```{r}
+library(dplyr)
+library(knitr)
+library(tibble)
+library(CORElearn)
+library(ggplot2)
+library(corrplot)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(e1071)
+```
+
+
+# Introduction
+
+
+# Reading Dataset
+
+
+**White Wine dataset**
+```{r}
+whiteWineURL <- "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-white.csv"
+
+whiteRawData <- read.csv(whiteWineURL, header = TRUE, sep = ";")
+```
+
+**Red Wine dataset**
+
+```{r}
+redWineURL <- "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv"
+
+redRawData <- read.csv(redWineURL, header = TRUE, sep = ";")
+```
+
+Add Color attribute
+
+```{r}
+redRawData['color'] <- 'red.wine'
+whiteRawData['color'] <- 'white.wine'
+```
+
+
+Number of samples in raw data
+```{r}
+nrow(redRawData)
+```
+
+
+```{r}
+nrow(whiteRawData)
+```
+
+## Unknown Values ##
+
+Datasets have no unknown values
+```{r}
+any(is.na(whiteRawData))
+any(is.na(redRawData))
+```
+
+
+## Duplicated Samples ##
+
+
+There are duplicated samples in both of the datasets
+
+```{r}
+any(duplicated(whiteRawData))
+```
+
+```{r}
+any(duplicated(redRawData))
+```
+
+Remove duplicated data
+```{r}
+whiteRawData <- whiteRawData[!duplicated(whiteRawData),]
+redRawData <- redRawData[!duplicated(redRawData),]
+```
+
+Number of samples are reduced
+```{r}
+nrow(redRawData)
+```
+
+
+```{r}
+nrow(whiteRawData)
+```
+
+## Attribute Overview ##
+
+Quality value ranges from 3 to 9 in white wine dataset.
+```{r}
+unique(whiteRawData$quality)
+```
+
+
+On the other hand quality in red wine dataset ranges from 3 to 8.
+```{r}
+unique(redRawData$quality)
+```
+
+
+If we look at any dataset, quality values are integer.
+This causes trouble in R functions when evaluating quality and other attributes together.
+
+```{r}
+kable(sapply(whiteRawData, class))
+```
+
+
+We can cast quality values to numeric.
+
+```{r}
+whiteRawData$quality <- as.numeric(whiteRawData$quality)
+redRawData$quality <- as.numeric(redRawData$quality)
+```
+
+```{r}
+mergedRawData <- rbind(whiteRawData, redRawData)
+```
+
+Quality values can be categorized as "Poor", "Normal" and "Good".
+
+```{r}
+whiteData <- whiteRawData
+whiteData$quality <- cut(whiteData$quality, 
+                          breaks=c(3, 5, 6, Inf), 
+                          labels=c("Poor", "Normal", "Good"), 
+                          include.lowest = TRUE)
+```
+
+
+```{r}
+redData <- redRawData
+redData$quality <- cut(redData$quality, 
+                      breaks=c(3, 5, 6, Inf), 
+                      labels=c("Poor", "Normal", "Good"), 
+                      include.lowest = TRUE)
+```
+
+
+Merged dataset
+
+```{r}
+mergedData <- rbind(whiteData, redData)
+```
+
+# Explotary Data Analysis
+
+
+## Custom Functions ## 
+
+```{r}
+histogramPlot <- function(data, attribute, binWidth, xLabel, title) 
+{
+   ggplot(data, aes(x=attribute, fill = quality)) + 
+    geom_histogram(binwidth = binWidth, color="black", fill="steelblue", linetype="dashed") +
+    ggtitle(title) +
+    labs(x = xLabel, y = "Count") + 
+    facet_wrap( ~quality) + 
+    theme(plot.title = element_text(hjust = 0.5))
+}
+```
+
+```{r}
+histogramByLogScalePlot <- function(data, attribute, binWidth, xLabel, title) 
+{
+  ggplot(data, aes(x=attribute)) + 
+    geom_histogram(binwidth = binWidth, color="black", fill="steelblue", linetype="dashed") +
+    scale_x_log10()+
+    ggtitle(title) +
+    labs(x = xLabel, y = "Count") + 
+    facet_wrap( ~color) + 
+    theme(plot.title = element_text(hjust = 0.5))
+  
+}
+```
+
+```{r}
+attibutesOverQualityBoxplot <- function (attribute, title) 
+{
+  ggplot(mergedData, aes(x = factor(quality), y = attribute)) + 
+    stat_boxplot(geom ='errorbar') + 
+    labs(x = "Quality", y = "Value") + 
+    ggtitle(title) +
+    geom_boxplot(outlier.colour = "red", outlier.shape = 1,  colour = "blue") +
+    geom_jitter(size = 1.5, alpha = 0.1)  +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    facet_wrap(~color)
+}
+
+```
+
+
+## Quality ##
+
+Number of Samples according to numeric qualities.
+
+```{r}
+ggplot(data = mergedRawData, aes(x = quality)) +
+  geom_bar(fill="steelblue", width=0.5) +
+  ggtitle("Number Of Samples According to Quality") +
+  labs(x = "Quality", y = "Count") + 
+  geom_text(stat = 'count',aes(label =..count.., vjust = -0.2)) +
+  facet_wrap( ~color) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_x_continuous(breaks = unique(mergedRawData$quality))
+```
+
+Number of Samples according to categorical qualities.
+```{r}
+ggplot(data = mergedData, aes(x = quality)) +
+  geom_bar(fill="steelblue", width=0.5) +
+  ggtitle("Number Of Samples According to Quality") +
+  labs(x = "Quality", y = "Count") + 
+  geom_text(stat = 'count',aes(label =..count.., vjust = -0.2)) +
+  facet_wrap( ~color) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+
+## Fixed Acidity ##
+
+
+```{r}
+histogramPlot(whiteData, whiteData$fixed.acidity, 0.5, 
+              "Fixed Acidity", "Histogram of White Wine Fixed Acidity")
+```
+
+```{r}
+histogramPlot(redData, redData$fixed.acidity, 0.5, 
+              "Fixed Acidity", "Red Wine Histogram of Red Wine Fixed Acidity")
+```
+
+```{r}
+attibutesOverQualityBoxplot(mergedData$fixed.acidity, "Fixed Acidity Boxplot")
+```
+
+```{r}
+redData %>% 
+  select(fixed.acidity) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+```{r}
+whiteData %>% 
+  select(fixed.acidity) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+
+## Volatile Acidity ##
+
+```{r}
+histogramPlot(whiteData, whiteData$volatile.acidity, 0.05, 
+              "Volatile Acidity", "Histogram of White Wine Volatile Acidity")
+```
+
+
+```{r}
+histogramPlot(redData, redData$volatile.acidity, 0.05, 
+              "Volatile Acidity", "Histogram of Red Wine Volatile Acidity")
+```
+
+
+```{r}
+attibutesOverQualityBoxplot(mergedData$volatile.acidity, "Volatile Acidity Boxplot")
+```
+
+
+```{r}
+redData %>% 
+  select(volatile.acidity) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+```{r}
+whiteData %>% 
+  select(volatile.acidity) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+
+## Citric Acid  ##
+```{r}
+histogramPlot(whiteData, whiteData$citric.acid, 0.05, "Citric Acidity", "Histogram of Citric Acidity")
+```
+
+```{r}
+histogramPlot(redData, redData$citric.acid, 0.05, "Citric Acidity", "Histogram of Citric Acidity")
+```
+
+
+```{r}
+attibutesOverQualityBoxplot(mergedData$citric.acid, "Citric Acidity Boxplot")
+```
+
+
+
+```{r}
+redData %>% 
+  select(citric.acid) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+```{r}
+whiteData %>% 
+  select(citric.acid) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+
+## Residual Sugar  ##
+
+```{r}
+histogramPlot(whiteData, whiteData$residual.sugar, 2.5, "Residual Sugar","Histogram of Residual Sugar")
+```
+
+
+```{r}
+histogramPlot(redData, redData$residual.sugar, 2.5, "Residual Sugar","Histogram of Residual Sugar")
+```
+
+
+```{r}
+attibutesOverQualityBoxplot(mergedData$residual.sugar, "Residual Sugar Boxplot")
+```
+
+
+```{r}
+redData %>% 
+  select(residual.sugar) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+```{r}
+whiteData %>% 
+  select(residual.sugar) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+## Chlorides  ##
+
+```{r}
+histogramPlot(whiteData, whiteData$chlorides, 0.025, 
+              "Chlorides", "Histogram of White Wine Chlorides")
+```
+
+```{r}
+histogramPlot(redData, redData$chlorides, 0.025, 
+              "Chlorides", "Histogram of Red Wine Chlorides")
+```
+
+
+```{r}
+attibutesOverQualityBoxplot(mergedData$chlorides, "Chlorides Boxplot")
+```
+
+
+```{r}
+redData %>% 
+  select(chlorides) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+```{r}
+whiteData %>% 
+  select(chlorides) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+
+
+
+## Free Sulfur Dioxide##
+
+```{r}
+histogramPlot(whiteData, whiteData$free.sulfur.dioxide, 10.0, 
+              "Free Sulfur Dioxide","Histogram of White Wine Free Sulfur Dioxide")
+```
+
+
+```{r}
+histogramPlot(redData, redData$free.sulfur.dioxide, 5.0, 
+              "Free Sulfur Dioxide","Histogram of Red Wine Free Sulfur Dioxide")
+```
+
+```{r}
+attibutesOverQualityBoxplot(mergedData$free.sulfur.dioxide, "Free Sulfur Dioxide Boxplot")
+```
+
+
+
+```{r}
+redData %>% 
+  select(free.sulfur.dioxide) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+```{r}
+whiteData %>% 
+  select(free.sulfur.dioxide) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+
+
+
+## Total Sulfur Dioxide ##
+
+```{r}
+histogramPlot(mergedData, mergedData$total.sulfur.dioxide, 10.0, 
+              "Total Sulfur Dioxide", "Histogram of White Wine Total Sulfur Dioxide")
+```
+
+
+```{r}
+histogramPlot(redData, redData$total.sulfur.dioxide, 10.0, 
+              "Total Sulfur Dioxide", "Histogram of Red Wine Total Sulfur Dioxide")
+```
+
+```{r}
+attibutesOverQualityBoxplot(mergedData$total.sulfur.dioxide, "Total Sulfur Dioxide Boxplot")
+```
+
+
+```{r}
+redData %>% 
+  select(total.sulfur.dioxide) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+```{r}
+whiteData %>% 
+  select(total.sulfur.dioxide) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+
+## Density ##
+
+```{r}
+histogramPlot(whiteData, whiteData$density, 0.001, 
+              "Density", "Histogram of White Wine Density")
+```
+
+
+
+```{r}
+histogramPlot(redData, redData$density, 0.001, 
+              "Density", "Histogram of Red Wine Density")
+```
+
+
+
+```{r}
+attibutesOverQualityBoxplot(mergedData$density, "Density Boxplot")
+```
+
+
+
+```{r}
+redData %>% 
+  select(density) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+```{r}
+whiteData %>% 
+  select(density) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+
+
+## pH ##
+
+```{r}
+histogramPlot(whiteData, whiteData$pH, 0.05, "pH","Histogram of White Wine pH")
+```
+
+
+```{r}
+histogramPlot(redData, redData$pH, 0.05, "pH","Histogram of Red Wine pH")
+```
+
+```{r}
+attibutesOverQualityBoxplot(mergedData$pH, "pH Boxplot")
+```
+
+
+
+```{r}
+redData %>% 
+  select(pH) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+```{r}
+whiteData %>% 
+  select(pH) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+
+
+## Sulphates ##
+
+```{r}
+histogramPlot(whiteData, whiteData$sulphates, 0.05, 
+              "Sulphates","Histogram of White Wine Sulphates")
+```
+
+
+```{r}
+histogramPlot(redData, redData$sulphates, 0.05, 
+              "Sulphates","Histogram of Red Wine Sulphates")
+```
+
+
+```{r}
+attibutesOverQualityBoxplot(mergedData$sulphates, "Sulphates Boxplot")
+```
+
+```{r}
+redData %>% 
+  select(sulphates) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+```{r}
+whiteData %>% 
+  select(sulphates) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+
+
+## Alcohol ##
+
+```{r}
+histogramPlot(whiteData, whiteData$alcohol, 0.5, 
+              "Alcohol","Histogram of White Wine Alcohol")
+```
+
+
+```{r}
+histogramPlot(redData, redData$alcohol, 0.5, 
+              "Alcohol","Histogram of Red Wine Alcohol")
+```
+
+
+```{r}
+attibutesOverQualityBoxplot(mergedData$alcohol, "Alcohol Boxplot")
+```
+
+```{r}
+redData %>% 
+  select(alcohol) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+```{r}
+whiteData %>% 
+  select(alcohol) %>% 
+  summarise_all(list(md = median, mn = mean, sd = sd, IQR = IQR)) %>% kable
+```
+
+## Correlation Matrix ##
+
+
+### Red Wine Dataset ###
+
+
+```{r}
+
+cex.before <- par("cex")
+par(cex = 0.7)
+corrplot(as.matrix(cor(subset(redRawData, select=-c(color)))), 
+         cl.lim = c(-100, 100), type = "upper", insig = "blank", method = "color",
+    addCoef.col="grey", 
+    order = "AOE", tl.cex = 1/par("cex"),
+    cl.cex = 1/par("cex"), addCoefasPercent = TRUE)
+par(cex = cex.before)
+
+```
+
+
+Quality is correlated positively with Alcohol and Sulphate, negatively with Volatile Acidity.
+
+Also Information Gain supports correlation matrix and gives same attributes.
+
+
+
+```{r}
+attrEval(quality ~ ., data=select(redData, -color),  estimator = "InfGain") %>% sort(decreasing = TRUE) %>% kable 
+```
+
+
+
+
+#```{r}
+#ggplot(redData, aes(x=alcohol, y=sulphates, color=quality, shape=quality)) +
+#   geom_point() + 
+#  geom_smooth(method=lm, se=FALSE, fullrange=TRUE)
+#```
+
+
+
+
+
+
+### White Wine Dataset ###
+
+```{r}
+
+cex.before <- par("cex")
+par(cex = 0.7)
+corrplot(as.matrix(cor(subset(whiteRawData, select=-c(color)))), cl.lim = c(-100, 100), type = "upper", insig = "blank", method = "color",
+    addCoef.col="grey", 
+    order = "AOE", tl.cex = 1/par("cex"),
+    cl.cex = 1/par("cex"), addCoefasPercent = TRUE)
+par(cex = cex.before)
+
+```
+
+
+Quality is correlated positively with Alcohol, negatively with Density and Chloride.
+
+Information Gain shows Alcohol is an important attribute to determine quality of a wine in both of the datasets.
+
+
+```{r}
+attrEval(quality ~ ., data=select(whiteData, -color),  estimator = "InfGain") %>% 
+        sort(decreasing = TRUE) %>% kable 
+```
+
+
+```{r}
+set.seed(1024)
+samples <- sample(1:nrow(whiteData), nrow(whiteData)*0.8)
+train <- whiteData[samples, ]
+test <- whiteData[-samples, ]
+```
+
+
+
+```{r}
+fit <- rpart(quality ~ ., data = train[,c("quality","alcohol", "density", "chlorides")], method = 'class')
+
+predicted <- predict(fit, test, type = "class")
+conf_matrix <- confusionMatrix(predicted, test$quality)
+
+conf_matrix$table
+conf_matrix$overall["Accuracy"]
+
+
+rpart.plot(fit)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# References #
+
+[Covariance and Correlation](https://towardsdatascience.com/let-us-understand-the-correlation-matrix-and-covariance-matrix-d42e6b643c22)
+
+
+
